@@ -12,5 +12,5 @@ struct Image {
 
 // Phase 1 functions
 Image loadImage(const std::string& path);
-Image toGrayscale(const Image& src); // parallelized with parallel_for
+Image toGrayscale(const Image& src, bool parallel); // parallelized with parallel_for
 void saveImage(const std::string& path, const Image& img);

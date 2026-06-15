@@ -37,7 +37,7 @@ Image loadImage(const std::string& path) {
 
 // Phase 1
 // grayscale conversion, every pixels in a RGB image is converted to a gray version
-Image toGrayscale(const Image& src) {
+Image toGrayscale(const Image& src, bool parallel) {
 
 	// Check if image is already in grayscale
 	if (src.channels == 1) {
@@ -52,32 +52,36 @@ Image toGrayscale(const Image& src) {
 	// grayscale image has only 1 byte for pixels
 	gray.data.resize(src.width * src.height);
 
-	oneapi::tbb::parallel_for(oneapi::tbb::blocked_range<int>(0, src.height), 
+	
 		// lambda for each row in image
-		[&](const oneapi::tbb::blocked_range<int>& range) {
+	auto body = [&](const oneapi::tbb::blocked_range<int>& range) {
+		for (int row = range.begin(); row < range.end(); ++row) {
+			for (int col = 0; col < src.width; ++col) {
 
-			for (int row = range.begin(); row < range.end(); ++row) {
-				for (int col = 0; col < src.width; ++col) {
+				int srcIdx = (row * src.width + col) * 3;
+				// index of the first byte of the pixel in RGB
+				// int srcIdx = (row * src.width + col) * 3;
+				unsigned char r = src.data[srcIdx + 0]; // red
+				unsigned char g = src.data[srcIdx + 1]; // green
+				unsigned char b = src.data[srcIdx + 2]; // blue
 
-					// index of the first byte of the pixel in RGB
-					int srcIdx = (row * src.width + col) * 3;
+				// grayscale conversion
+				unsigned char grayVal = static_cast<unsigned char>(0.299f * r + 0.587f * g + 0.114f * b);
 
-					unsigned char r = src.data[srcIdx + 0]; // red
-					unsigned char g = src.data[srcIdx + 1]; // green
-					unsigned char b = src.data[srcIdx + 2]; // blue
-
-					// grayscale conversion
-					unsigned char grayVal = static_cast<unsigned char>(0.299f * r + 0.587f * g + 0.114f * b);
-
-					// index in grayscale array, only 1 byte by pixel
-					int dstIdx = row * src.width + col;
-					gray.data[dstIdx] = grayVal;
-				}
+				// index in grayscale array, only 1 byte by pixel
+				int dstIdx = row * src.width + col;
+				gray.data[dstIdx] = grayVal;
 			}
 		}
-	);
+		};
 
-	std::cout << "Grayscale conversion finished.\n";
+	if (parallel) {
+		oneapi::tbb::parallel_for(oneapi::tbb::blocked_range<int>(0, src.height), body);
+	}
+	else {
+		body(oneapi::tbb::blocked_range<int>(0, src.height));
+	}
+
 	return gray;
 }
 

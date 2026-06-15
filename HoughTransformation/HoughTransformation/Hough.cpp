@@ -11,7 +11,7 @@ const double PI = 3.14159265358979323846;
 
 // Phase 3
 // Hough accumulator
-std::vector<std::vector<std::atomic<int>>> buildAccumulator(const Image& edges, int numTheta, int numRho, double& rhoMax, int& maxVotes) {
+std::vector<std::vector<std::atomic<int>>> buildAccumulator(const Image& edges, int numTheta, int numRho, double& rhoMax, int& maxVotes, bool parallel) {
 
 	if (edges.channels != 1) {
 		throw std::runtime_error("buildAccumulator expects an image where cannels = 1");
@@ -35,6 +35,7 @@ std::vector<std::vector<std::atomic<int>>> buildAccumulator(const Image& edges, 
 
 	double thetaStep = PI / numTheta;
 
+	// Pre-calculate sin/cos
 	std::vector<double> sinTable(numTheta);
 	std::vector<double> cosTable(numTheta);
 	for (int t = 0; t < numTheta; ++t) {
@@ -43,7 +44,7 @@ std::vector<std::vector<std::atomic<int>>> buildAccumulator(const Image& edges, 
 		cosTable[t] = std::cos(theta);
 	}
 
-	oneapi::tbb::parallel_for(oneapi::tbb::blocked_range<int>(0, edges.height), [&](const oneapi::tbb::blocked_range<int>& range) {
+	auto accBody = [&](const oneapi::tbb::blocked_range<int>& range) {
 		for (int y = range.begin(); y < range.end(); ++y) {
 			for (int x = 0; x < edges.width; ++x) {
 
@@ -70,8 +71,14 @@ std::vector<std::vector<std::atomic<int>>> buildAccumulator(const Image& edges, 
 				}
 			}
 		}
-		}
-	);
+		};
+
+	if (parallel) {
+		oneapi::tbb::parallel_for(oneapi::tbb::blocked_range<int>(0, edges.height), accBody);
+	}
+	else {
+		accBody(tbb::blocked_range<int>(0, edges.height));
+	}
 
 	maxVotes = 0;
 	for (int r = 0; r < numRho; ++r) {
@@ -93,7 +100,7 @@ std::vector<std::vector<std::atomic<int>>> buildAccumulator(const Image& edges, 
 std::vector<Line> findLines(
 	const std::vector<std::vector<std::atomic<int>>>& accumulator,
 	int numTheta, int numRho,
-	double rhoMax, int threshold) {
+	double rhoMax, int threshold, bool parallel) {
 
 	oneapi::tbb::concurrent_vector<Line> found;
 
@@ -105,7 +112,7 @@ std::vector<Line> findLines(
 
 	double thetaStep = PI / numTheta;
 
-	oneapi::tbb::parallel_for(oneapi::tbb::blocked_range<int>(0, numRho), [&](const oneapi::tbb::blocked_range<int>& range) {
+	auto findBody = [&](const oneapi::tbb::blocked_range<int>& range) {
 		for (int r = range.begin(); r < range.end(); ++r) {
 			for (int t = 0; t < numTheta; ++t) {
 
@@ -156,7 +163,14 @@ std::vector<Line> findLines(
 				}
 			}
 		}
-		});
+		};
+
+	if (parallel) {
+		oneapi::tbb::parallel_for(oneapi::tbb::blocked_range<int>(0, numRho), findBody);
+	}
+	else {
+		findBody(tbb::blocked_range<int>(0, numRho));
+	}
 
 	std::cout << "Found lines (pre filter): " << found.size() << "\n";
 
@@ -218,6 +232,7 @@ Image drawLines(const Image& original, const std::vector<Line>& lines) {
 			if (px >= 0 && px < result.width && py >= 0 && py < result.height) {
 
 				int idx = (py * result.width + px) * 3;
+				if (idx + 2 >= result.data.size()) continue;
 
 				result.data[idx + 0] = 255;
 				result.data[idx + 1] = 0;
@@ -236,6 +251,9 @@ Image drawLines(const Image& original, const std::vector<Line>& lines) {
 
 void saveAccumulatorImage(const std::string& path, const std::vector<std::vector<std::atomic<int>>>& accumulator, int numTheta, int numRho, int maxVotes)
 {
+
+	if (numRho < 0 || numTheta <= 0 || accumulator.empty()) return;
+
 	// image dimension
 	int viewWidth = 800;
 	int viewHeight = 800;

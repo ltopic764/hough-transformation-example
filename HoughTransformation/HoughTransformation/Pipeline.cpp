@@ -32,6 +32,7 @@ void runPipeline(const std::string& inputPath, const std::string& outputPath) {
 		int numRho;
 		int maxVotes;
 		int otsuThreshold;
+		bool isParallel;
 	};
 
 	using DataPtr = std::shared_ptr<PipelineData>;
@@ -39,14 +40,11 @@ void runPipeline(const std::string& inputPath, const std::string& outputPath) {
 
 	// Phase 1
 	// Load + grayscale
-	function_node<std::string, DataPtr> phase1(g, 1, [](const std::string& path) -> DataPtr {
-		
-		auto data = std::make_shared<PipelineData>();
+	function_node<DataPtr, DataPtr> phase1(g, 1, [](DataPtr data) -> DataPtr {
 		
 		auto start = std::chrono::high_resolution_clock::now();
 		
-		data->original = loadImage(path);
-		data->gray = toGrayscale(data->original);
+		data->gray = toGrayscale(data->original, data->isParallel);
 
 		auto end = std::chrono::high_resolution_clock::now();
 		std::cout << "Phase 1 (grayscale): "
@@ -61,7 +59,7 @@ void runPipeline(const std::string& inputPath, const std::string& outputPath) {
 		
 		auto start = std::chrono::high_resolution_clock::now();
 
-		data->edges = applySobel(data->gray, SOBEL_THRESHOLD);
+		data->edges = applySobel(data->gray, SOBEL_THRESHOLD, data->isParallel);
 		
 		auto end = std::chrono::high_resolution_clock::now();
 		std::cout << "Phase 2 (edges): "
@@ -86,7 +84,7 @@ void runPipeline(const std::string& inputPath, const std::string& outputPath) {
 
 		data->numRho = numRho;
 
-		data->accumulator = buildAccumulator(data->edges, NUM_THETA, numRho, data->rhoMax, data->maxVotes);
+		data->accumulator = buildAccumulator(data->edges, NUM_THETA, numRho, data->rhoMax, data->maxVotes, data->isParallel);
 
 		auto end = std::chrono::high_resolution_clock::now();
 		std::cout << "Phase 3 (accumulator): "
@@ -107,7 +105,7 @@ void runPipeline(const std::string& inputPath, const std::string& outputPath) {
 			<< " (= " << (HOUGH_THRESHOLD_RATIO * 100) << "% od maxVotes="
 			<< data->maxVotes << ")\n";*/
 
-		std::vector<Line> lines = findLines(data->accumulator, NUM_THETA, data->numRho, data->rhoMax, houghThreshold);
+		std::vector<Line> lines = findLines(data->accumulator, NUM_THETA, data->numRho, data->rhoMax, houghThreshold, data->isParallel);
 
 		// original image with red lines
 		Image result = drawLines(data->original, lines);
@@ -127,24 +125,6 @@ void runPipeline(const std::string& inputPath, const std::string& outputPath) {
 			<< std::chrono::duration_cast<std::chrono::milliseconds>(end - start).count()
 			<< "ms\n";
 
-		// write to extrenal file
-		std::string reportPath = outputPath.substr(0, outputPath.find_last_of('.')) + "_report.txt";
-		std::ofstream report(reportPath);
-		if (report.is_open()) {
-			report << "Result of Hough's transformation\n";
-			report << "Input image: " << inputPath << "\n";
-			report << "Image dimension: " << data->original.width << "x" << data->original.height << "\n";
-			report << "Number of lines: " << lines.size() << "\n";
-			report << "Max num. of votes in a point: " << data->maxVotes << "\n";
-			report << "\n";
-			report << "Performance" << "\n";
-			// add time difference between sequential and || program
-			report.close();
-			std::cout << "Generated report: " << reportPath << "\n";
-		}
-
-
-
 		return continue_msg();
 		});
 
@@ -152,12 +132,46 @@ void runPipeline(const std::string& inputPath, const std::string& outputPath) {
 	make_edge(phase2, phase3);
 	make_edge(phase3, phase4);
 
-	auto totalStart = std::chrono::high_resolution_clock::now();
+	Image loadedImg = loadImage(inputPath);
 
-	phase1.try_put(inputPath);
+	// Sequential execution
+	auto dataSeq = std::make_shared<PipelineData>();
+	dataSeq->original = loadedImg;
+	dataSeq->isParallel = false;
+
+	auto startSeq = std::chrono::high_resolution_clock::now();
+	phase1.try_put(dataSeq);
 	g.wait_for_all();
+	auto endSeq = std::chrono::high_resolution_clock::now();
+	long long tSeq = std::chrono::duration_cast<std::chrono::milliseconds>(endSeq - startSeq).count();
 
-	auto totalEnd = std::chrono::high_resolution_clock::now();
-	auto totalMs = std::chrono::duration_cast<std::chrono::milliseconds>(totalEnd - totalStart).count();
-	std::cout << "\n[TOTAL] Pipeline: " << totalMs << " ms\n";
+	// Parallel execution
+	auto dataPar = std::make_shared<PipelineData>();
+	dataPar->original = dataSeq->original;
+	dataPar->isParallel = true;
+
+	auto startPar = std::chrono::high_resolution_clock::now();
+	phase1.try_put(dataPar);
+	g.wait_for_all();
+	auto endPar = std::chrono::high_resolution_clock::now();
+	long long tPar = std::chrono::duration_cast<std::chrono::milliseconds>(endPar - startPar).count();
+
+	// See the difference in execution speed
+	double speedup = static_cast<double>(tSeq) / tPar;
+
+	// write to extrenal file
+	std::string reportPath = outputPath.substr(0, outputPath.find_last_of('.')) + "_report.txt";
+	std::ofstream report(reportPath);
+	if (report.is_open()) {
+		report << "Result of Hough's transformation\n";
+		report << "Input image: " << inputPath << "\n";
+		report << "Image dimension: " << loadedImg.width << "x" << loadedImg.height << "\n";
+		report << "\n";
+		report << "Performance" << "\n";
+		report << "Sequential time: " << tSeq << " ms\n";
+		report << "Parallel time: " << tPar << " ms\n";
+		report << "tSeq/tPar: " << speedup << "x\n";
+		report.close();
+		std::cout << "Generated report: " << reportPath << "\n";
+	}
 }

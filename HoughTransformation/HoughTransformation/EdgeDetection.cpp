@@ -9,7 +9,13 @@
 // Sobel edge detection
 // Sobel uses two 3x3 kernels (Gx and Gy) to compute gradient magnitude
 // gradient = sqrt(Gx^2 + Gy^2),  if > threshold, then its edge pixel
-Image applySobel(const Image& gray, int threshold) {
+Image applySobel(const Image& gray, int threshold, bool parallel) {
+
+	std::cout << "DEBUG: Sobel ulaz - W:" << gray.width << " H:" << gray.height << " Data size:" << gray.data.size() << std::endl;
+
+	if (gray.data.empty() || gray.width <= 0) {
+		throw std::runtime_error("Sobel dobio praznu sliku!");
+	}
 
 	// Input image has to be grayscale
 	if (gray.channels != 1) {
@@ -17,7 +23,7 @@ Image applySobel(const Image& gray, int threshold) {
 	}
 
 	// OTSU
-	int otsuThreshold = calculateOtsuThreshold(gray);
+	int otsuThreshold = calculateOtsuThreshold(gray, parallel);
 	int finalThreshold = otsuThreshold * 0.9;
 
 	//std::cout << "  Otsu dao prag: " << otsuThreshold << "\n";
@@ -31,7 +37,7 @@ Image applySobel(const Image& gray, int threshold) {
 	// Initialize all pixels to 0 (not an edge)
 	edges.data.resize(gray.width * gray.height, 0);
 
-	oneapi::tbb::parallel_for(oneapi::tbb::blocked_range<int>(1, gray.height - 1), [&](const oneapi::tbb::blocked_range<int>& range) {
+	auto body = [&](const oneapi::tbb::blocked_range<int>& range) {
 
 		for (int row = range.begin(); row < range.end(); ++row) {
 			for (int col = 1; col < gray.width - 1; ++col) {
@@ -42,9 +48,9 @@ Image applySobel(const Image& gray, int threshold) {
 				int tc = gray.data[(row - 1) * gray.width + (col)]; // top-center
 				int tr = gray.data[(row - 1) * gray.width + (col + 1)]; // top-right
 
-				int ml = gray.data[(row) *gray.width + (col - 1)]; // mid-left
+				int ml = gray.data[(row)*gray.width + (col - 1)]; // mid-left
 				// middle pixels not needed, coeficient is 0 in both of the kernels
-				int mr = gray.data[(row) *gray.width + (col + 1)]; // mid-right
+				int mr = gray.data[(row)*gray.width + (col + 1)]; // mid-right
 
 				int bl = gray.data[(row + 1) * gray.width + (col - 1)]; // bot-left
 				int bc = gray.data[(row + 1) * gray.width + (col)]; // bot-cent
@@ -68,8 +74,14 @@ Image applySobel(const Image& gray, int threshold) {
 				edges.data[dstIdx] = (magnitude > finalThreshold) ? 255 : 0;
 			}
 		}
+	};
 
-		});
+	if (parallel) {
+		oneapi::tbb::parallel_for(oneapi::tbb::blocked_range<int>(1, gray.height-1), body);
+	}
+	else {
+		body(oneapi::tbb::blocked_range<int>(1, gray.height-1));
+	}
 
 	// Calculate edges
 	int edgeCount = 0;
@@ -84,23 +96,33 @@ Image applySobel(const Image& gray, int threshold) {
 }
 
 
-int calculateOtsuThreshold(const Image& gray) {
+int calculateOtsuThreshold(const Image& gray, bool parallel) {
 	// Calculate histogram
-	// How many of each values from 0-255 there are
-	std::vector<long long> hist = tbb::parallel_reduce(
-		tbb::blocked_range<size_t>(0, gray.data.size()),
-		std::vector<long long>(256, 0),
-		[&](const tbb::blocked_range<size_t>& r, std::vector<long long> local_hist) {
-			for (size_t i = r.begin(); i < r.end(); ++i) {
-				local_hist[gray.data[i]]++;
+	std::vector<long long> hist(256, 0);
+
+	if (parallel) {
+		// How many of each values from 0-255 there are
+		hist = tbb::parallel_reduce(
+			tbb::blocked_range<size_t>(0, gray.data.size()),
+			std::vector<long long>(256, 0),
+			[&](const tbb::blocked_range<size_t>& r, std::vector<long long> local_hist) {
+				for (size_t i = r.begin(); i < r.end(); ++i) {
+					local_hist[gray.data[i]]++;
+				}
+				return local_hist;
+			},
+			[](std::vector<long long> a, const std::vector<long long>& b) {
+				for (int i = 0; i < 256; ++i) a[i] += b[i];
+				return a;
 			}
-			return local_hist;
-		},
-		[](std::vector<long long> a, const std::vector<long long>& b) {
-			for (int i = 0; i < 256; ++i) a[i] += b[i];
-			return a;
+		);
+	}
+	else {
+		// Sequential
+		for (unsigned char val : gray.data) {
+			hist[val]++;
 		}
-	);
+	}
 
 	long long total = gray.width * gray.height;
 	double sum = 0;
