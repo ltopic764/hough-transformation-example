@@ -233,3 +233,34 @@ Image drawLines(const Image& original, const std::vector<Line>& lines) {
 
 	return result;
 }
+
+void saveAccumulatorImage(const std::string& path, const std::vector<std::vector<std::atomic<int>>>& accumulator, int numTheta, int numRho, int maxVotes)
+{
+	// image dimension
+	int viewWidth = 800;
+	int viewHeight = 800;
+
+	Image accImg;
+	accImg.width = viewHeight;
+	accImg.height = viewWidth;
+	accImg.channels = 1;
+	accImg.data.resize(viewWidth * viewHeight);
+
+	for (int y = 0; y < viewHeight; ++y) {
+		for (int x = 0; x < viewWidth; ++x) {
+			// map pixel to (theta, ro)
+			int t = static_cast<int>((static_cast<double>(x) / viewWidth) * numTheta);
+			int r = static_cast<int>((static_cast<double>(y) / viewHeight) * numRho);
+
+			if (t >= numTheta) t = numTheta - 1;
+			if (r >= numRho) r = numRho - 1;
+
+			int votes = accumulator[r][t].load();
+
+			double val = (static_cast<double>(votes) / maxVotes);
+
+			accImg.data[y * viewWidth + x] = static_cast<unsigned char>(val * 255.0);
+		}
+	}
+	saveImage(path, accImg);
+}

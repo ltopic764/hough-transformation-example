@@ -25,3 +25,5 @@ std::vector<Line> findLines(
 
 // Draw detected lines onto a copy of the original image
 Image drawLines(const Image& original, const std::vector<Line>& lines);
+
+void saveAccumulatorImage(const std::string& path, const std::vector<std::vector<std::atomic<int>>>& accumulator, int numTheta, int numRho, int maxVotes);

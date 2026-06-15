@@ -30,6 +30,7 @@ void runPipeline(const std::string& inputPath, const std::string& outputPath) {
 		double rhoMax;
 		int numRho;
 		int maxVotes;
+		int otsuThreshold;
 	};
 
 	using DataPtr = std::shared_ptr<PipelineData>;
@@ -61,18 +62,6 @@ void runPipeline(const std::string& inputPath, const std::string& outputPath) {
 
 		data->edges = applySobel(data->gray, SOBEL_THRESHOLD);
 		
-		{
-			std::string edgesPath = outputPath;
-			size_t dot = edgesPath.find_last_of('.');
-			if (dot != std::string::npos) {
-				edgesPath = edgesPath.substr(0, dot) + "_edges.png";
-			}
-			else {
-				edgesPath += "_edges.png";
-			}
-			saveImage(edgesPath, data->edges);
-		}
-
 		auto end = std::chrono::high_resolution_clock::now();
 		std::cout << "Phase 2 (edges): "
 			<< std::chrono::duration_cast<std::chrono::milliseconds>(end - start).count()
@@ -119,8 +108,18 @@ void runPipeline(const std::string& inputPath, const std::string& outputPath) {
 
 		std::vector<Line> lines = findLines(data->accumulator, NUM_THETA, data->numRho, data->rhoMax, houghThreshold);
 
+		// original image with red lines
 		Image result = drawLines(data->original, lines);
 		saveImage(outputPath, result);
+
+		// edge image
+		std::string edgesPath = outputPath.substr(0, outputPath.find_last_of('.')) + "_edges.png";
+		saveImage(edgesPath, data->edges);
+
+		// accumulator image
+		std::string accPath = outputPath.substr(0, outputPath.find_last_of('.')) + "_accumulator.png";
+		saveAccumulatorImage(accPath, data->accumulator, NUM_THETA, data->numRho, data->maxVotes);
+
 
 		auto end = std::chrono::high_resolution_clock::now();
 		std::cout << "Phase 4 (line count/drawing): "
