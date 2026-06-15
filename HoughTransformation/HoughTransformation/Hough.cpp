@@ -79,14 +79,132 @@ std::vector<Line> findLines(
 
 	oneapi::tbb::concurrent_vector<Line> found;
 
-	// TODO: parallel_for over accumulator cells
-	// find lines based on maxima values
+	// Size of NMS window
+	const int neighborhoodSize = 2;
+
+	double thetaStep = PI / numTheta;
+
+	oneapi::tbb::parallel_for(oneapi::tbb::blocked_range<int>(0, numRho), [&](const oneapi::tbb::blocked_range<int>& range) {
+		for (int r = range.begin(); r < range.end(); ++r) {
+			for (int t = 0; t < numTheta; ++t) {
+
+				// current number of votes for this (rho, theta) cell
+				int currentVotes = accumulator[r][t].load();
+
+				// Check if the cell has enough votes
+				if (currentVotes <= threshold) {
+					continue;
+				}
+
+				bool isLocalMax = true;
+
+				for (int dr = -neighborhoodSize; dr <= neighborhoodSize && isLocalMax; ++dr) {
+					for (int dt = -neighborhoodSize; dt <= neighborhoodSize; ++dt) {
+
+						// skip self
+						if (dr == 0 && dt == 0) continue;
+
+						// 
+						int nr = r + dr;
+						int nt = t + dt;
+
+						if (nr < 0 || nr >= numRho) continue;
+						if (nt < 0 || nt >= numTheta) continue;
+
+						int neighborVotes = accumulator[nr][nt].load();
+
+						// If there exists a neighbor with more votes, current cell is not max
+						if (neighborhoodSize > currentVotes) {
+							isLocalMax = false;
+							break;
+						}
+					}
+				}
+
+				// If cell is max and passes the threshold it is a detected line
+				if (isLocalMax) {
+					Line line;
+
+					line.theta = t * thetaStep;
+
+					line.rho = (static_cast<double>(r) / numRho) * (2.0 * rhoMax) - rhoMax;
+
+					line.votes = currentVotes;
+
+					found.push_back(line);
+				}
+			}
+		}
+		});
 
 	return std::vector<Line>(found.begin(), found.end());
 }
 
 Image drawLines(const Image& original, const std::vector<Line>& lines) {
+	
+	// Copy of the original
 	Image result = original;
-	// TODO: for each line, compute endpoints and draw on result
+	
+	if (result.channels == 1) {
+		std::vector<unsigned char> rgbData(result.width * result.height * 3);
+		for (size_t i = 0; i < result.data.size(); ++i) {
+			rgbData[i * 3 + 0] = result.data[i]; //R
+			rgbData[i * 3 + 1] = result.data[i]; //G
+			rgbData[i * 3 + 2] = result.data[i]; //B
+		}
+		result.data = rgbData;
+		result.channels = 3;
+	}
+
+	const double L = 1000.0; // line length for drawing (can change)
+
+	for (const Line& line : lines) {
+
+		double cosT = std::cos(line.theta);
+		double sinT = std::sin(line.theta);
+
+		// Point on the line closest to (0,0)
+		double x0 = line.rho * cosT;
+		double y0 = line.rho * sinT;
+
+		int x1 = static_cast<int>(x0 + L * (-sinT));
+		int y1 = static_cast<int>(y0 + L * (cosT));
+
+		int x2 = static_cast<int>(x0 - L * (-sinT));
+		int y2 = static_cast<int>(y0 - L * (cosT));
+
+		// DDA for line drawing
+		int dx = x2 - x1;
+		int dy = y2 - y1;
+		int steps = std::max(std::abs(dx), std::abs(dy));
+
+		if (steps == 0); continue;
+
+		double xInc = static_cast<double>(dx) / steps;
+		double yInc = static_cast<double>(dy) / steps;
+
+		double x = x1;
+		double y = y1;
+
+		for (int i = 0; i <= steps; ++i) {
+
+			int px = static_cast<int>(std::round(x));
+			int py = static_cast<int>(std::round(y));
+
+			// Check if pixel in image
+			if (px >= 0 && px < result.width && py >= 0 && py < result.height) {
+
+				int idx = (py * result.width + px) * 3;
+
+				result.data[idx + 0] = 255;
+				result.data[idx + 1] = 0;
+				result.data[idx + 2] = 0;
+			}
+
+			x += xInc;
+			y += yInc;
+		}
+	}
+
 	return result;
 }

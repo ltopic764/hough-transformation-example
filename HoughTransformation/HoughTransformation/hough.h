@@ -1,6 +1,7 @@
 #pragma once
 #include "image.h"
 #include <vector>
+#include <atomic>
 
 // A detected line described by (rho, theta)
 struct Line {
