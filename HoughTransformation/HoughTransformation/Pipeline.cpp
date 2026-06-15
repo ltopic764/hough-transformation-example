@@ -13,9 +13,10 @@ const int SOBEL_THRESHOLD = 100;
 
 const int NUM_THETA = 180;
 
-const int NUM_RHO = 300;
+// width of rho bin in px
+const double RHO_BIN_WIDTH = 1.0;
 
-const int HOUGH_THRESHOLD = 100;
+const double HOUGH_THRESHOLD_RATIO = 0.3;
 
 void runPipeline(const std::string& inputPath, const std::string& outputPath) {
 	graph g;
@@ -27,6 +28,8 @@ void runPipeline(const std::string& inputPath, const std::string& outputPath) {
 		Image edges;
 		std::vector<std::vector<std::atomic<int>>> accumulator;
 		double rhoMax;
+		int numRho;
+		int maxVotes;
 	};
 
 	using DataPtr = std::shared_ptr<PipelineData>;
@@ -52,12 +55,24 @@ void runPipeline(const std::string& inputPath, const std::string& outputPath) {
 
 	// Phase 2
 	// Sobel edges detection
-	function_node<DataPtr, DataPtr> phase2(g, 1, [](DataPtr data) -> DataPtr {
+	function_node<DataPtr, DataPtr> phase2(g, 1, [&outputPath](DataPtr data) -> DataPtr {
 		
 		auto start = std::chrono::high_resolution_clock::now();
 
 		data->edges = applySobel(data->gray, SOBEL_THRESHOLD);
 		
+		{
+			std::string edgesPath = outputPath;
+			size_t dot = edgesPath.find_last_of('.');
+			if (dot != std::string::npos) {
+				edgesPath = edgesPath.substr(0, dot) + "_edges.png";
+			}
+			else {
+				edgesPath += "_edges.png";
+			}
+			saveImage(edgesPath, data->edges);
+		}
+
 		auto end = std::chrono::high_resolution_clock::now();
 		std::cout << "Phase 2 (edges): "
 			<< std::chrono::duration_cast<std::chrono::milliseconds>(end - start).count()
@@ -71,7 +86,17 @@ void runPipeline(const std::string& inputPath, const std::string& outputPath) {
 		
 		auto start = std::chrono::high_resolution_clock::now();
 
-		data->accumulator = buildAccumulator(data->edges, NUM_THETA, NUM_RHO, data->rhoMax);
+		// image diagonal
+		double diag = std::sqrt(
+			static_cast<double>(data->edges.width) * data->edges.width +
+			static_cast<double>(data->edges.height) * data->edges.height
+		);
+
+		int numRho = static_cast<int>((2.0 * diag) / RHO_BIN_WIDTH);
+
+		data->numRho = numRho;
+
+		data->accumulator = buildAccumulator(data->edges, NUM_THETA, numRho, data->rhoMax, data->maxVotes);
 
 		auto end = std::chrono::high_resolution_clock::now();
 		std::cout << "Phase 3 (accumulator): "
@@ -86,7 +111,13 @@ void runPipeline(const std::string& inputPath, const std::string& outputPath) {
 
 		auto start = std::chrono::high_resolution_clock::now();
 
-		std::vector<Line> lines = findLines(data->accumulator, NUM_THETA, NUM_RHO, data->rhoMax, HOUGH_THRESHOLD);
+		int houghThreshold = static_cast<int>(data->maxVotes * HOUGH_THRESHOLD_RATIO);
+
+		/*std::cout << "  houghThreshold racunat dinamicki: " << houghThreshold
+			<< " (= " << (HOUGH_THRESHOLD_RATIO * 100) << "% od maxVotes="
+			<< data->maxVotes << ")\n";*/
+
+		std::vector<Line> lines = findLines(data->accumulator, NUM_THETA, data->numRho, data->rhoMax, houghThreshold);
 
 		Image result = drawLines(data->original, lines);
 		saveImage(outputPath, result);

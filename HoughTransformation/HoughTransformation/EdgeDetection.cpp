@@ -1,7 +1,9 @@
 #include "edge_detection.h"
 #include <oneapi/tbb/parallel_for.h>
+#include <oneapi/tbb/parallel_reduce.h>
 #include <oneapi/tbb/blocked_range.h>
 #include <cmath>
+#include <iostream>
 
 // Phase 2
 // Sobel edge detection
@@ -13,6 +15,12 @@ Image applySobel(const Image& gray, int threshold) {
 	if (gray.channels != 1) {
 		throw std::runtime_error("applySobel expects a grayscale image");
 	}
+
+	// OTSU
+	int otsuThreshold = calculateOtsuThreshold(gray);
+	int finalThreshold = otsuThreshold * 0.9;
+
+	//std::cout << "  Otsu dao prag: " << otsuThreshold << "\n";
 
 	// Output image, same dimensions and also grayscale
 	// Values: 0 = not an edge, 255 = edge
@@ -53,11 +61,11 @@ Image applySobel(const Image& gray, int threshold) {
 					+ (1 * bl) + (2 * bc) + (1 * br);
 
 				// Calculate gradients magnitude
-				int magnitude = std::sqrt(gx * gy + gy * gy);
+				double magnitude = std::sqrt(static_cast<double>(gx) * gx + static_cast<double>(gy) * gy);
 
 				// Thresholding, see if this is an edge
 				int dstIdx = row * edges.width + col;
-				edges.data[dstIdx] = (magnitude > threshold) ? 255 : 0;
+				edges.data[dstIdx] = (magnitude > finalThreshold) ? 255 : 0;
 			}
 		}
 
@@ -68,6 +76,57 @@ Image applySobel(const Image& gray, int threshold) {
 	for (auto pixel : edges.data) {
 		if (pixel == 255) edgeCount++;
 	}
+
+	std::cout << "Sobel edge detection finished.\n";
+	std::cout << " Edge pixels found: " << edgeCount << "\n";
 	
 	return edges;
+}
+
+
+int calculateOtsuThreshold(const Image& gray) {
+	// Calculate histogram
+	// How many of each values from 0-255 there are
+	std::vector<long long> hist = tbb::parallel_reduce(
+		tbb::blocked_range<size_t>(0, gray.data.size()),
+		std::vector<long long>(256, 0),
+		[&](const tbb::blocked_range<size_t>& r, std::vector<long long> local_hist) {
+			for (size_t i = r.begin(); i < r.end(); ++i) {
+				local_hist[gray.data[i]]++;
+			}
+			return local_hist;
+		},
+		[](std::vector<long long> a, const std::vector<long long>& b) {
+			for (int i = 0; i < 256; ++i) a[i] += b[i];
+			return a;
+		}
+	);
+
+	long long total = gray.width * gray.height;
+	double sum = 0;
+	for (int i = 0; i < 256; ++i) sum += i * hist[i];
+
+	double sumB = 0;
+	long long wB = 0;
+	double maxVar = 0;
+	int threshold = 0;
+
+	for (int i = 0; i < 256; ++i) {
+		wB += hist[i];
+		if (wB == 0) continue;
+		long long wF = total - wB;
+		if (wF == 0) break;
+
+		sumB += (double)(i * hist[i]);
+		double mB = sumB / wB;
+		double mF = (sum - sumB) / wF;
+
+		double varBetween = (double)wB * (double)wF * (mB - mF) * (mB - mF);
+
+		if (varBetween > maxVar) {
+			maxVar = varBetween;
+			threshold = i;
+		}
+	}
+	return threshold;
 }

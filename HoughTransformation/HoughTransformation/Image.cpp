@@ -77,6 +77,7 @@ Image toGrayscale(const Image& src) {
 		}
 	);
 
+	std::cout << "Grayscale conversion finished.\n";
 	return gray;
 }
 
@@ -101,4 +102,7 @@ void saveImage(const std::string& path, const Image& img) {
 	if (!result) {
 		throw std::runtime_error("Cannot save image: " + path);
 	}
+
+
+	std::cout << "Image saved: " << path << "\n";
 }

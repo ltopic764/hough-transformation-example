@@ -14,7 +14,7 @@ struct Line {
 // accumulator[rho_idx][theta_idx] counts votes
 // parallelized with parallel_for + atomic increments
 std::vector<std::vector<std::atomic<int>>> buildAccumulator(
-    const Image& edges, int numTheta, int numRho, double& rhoMax);
+    const Image& edges, int numTheta, int numRho, double& rhoMax, int& maxVotes);
 
 // Phase 4 - find lines from accumulator peaks
 // uses parallel_for + concurrent_vector to collect results

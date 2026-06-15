@@ -11,7 +11,7 @@ const double PI = 3.14159265358979323846;
 
 // Phase 3
 // Hough accumulator
-std::vector<std::vector<std::atomic<int>>> buildAccumulator(const Image& edges, int numTheta, int numRho, double& rhoMax) {
+std::vector<std::vector<std::atomic<int>>> buildAccumulator(const Image& edges, int numTheta, int numRho, double& rhoMax, int& maxVotes) {
 
 	if (edges.channels != 1) {
 		throw std::runtime_error("buildAccumulator expects an image where cannels = 1");
@@ -35,6 +35,14 @@ std::vector<std::vector<std::atomic<int>>> buildAccumulator(const Image& edges, 
 
 	double thetaStep = PI / numTheta;
 
+	std::vector<double> sinTable(numTheta);
+	std::vector<double> cosTable(numTheta);
+	for (int t = 0; t < numTheta; ++t) {
+		double theta = t * thetaStep;
+		sinTable[t] = std::sin(theta);
+		cosTable[t] = std::cos(theta);
+	}
+
 	oneapi::tbb::parallel_for(oneapi::tbb::blocked_range<int>(0, edges.height), [&](const oneapi::tbb::blocked_range<int>& range) {
 		for (int y = range.begin(); y < range.end(); ++y) {
 			for (int x = 0; x < edges.width; ++x) {
@@ -48,10 +56,8 @@ std::vector<std::vector<std::atomic<int>>> buildAccumulator(const Image& edges, 
 
 				for (int t = 0; t < numTheta; ++t) {
 
-					double theta = t * thetaStep;
-
 					// Houghs formula
-					double rho = x * std::cos(theta) + y * std::sin(theta);
+					double rho = x * cosTable[t] + y * sinTable[t];
 
 					int rhoIdx = static_cast<int>(
 						((rho + rhoMax) / (2.0 * rhoMax)) * numRho
@@ -67,6 +73,18 @@ std::vector<std::vector<std::atomic<int>>> buildAccumulator(const Image& edges, 
 		}
 	);
 
+	maxVotes = 0;
+	for (int r = 0; r < numRho; ++r) {
+		for (int t = 0; t < numTheta; ++t) {
+			int v = accumulator[r][t].load();
+			if (v > maxVotes) maxVotes = v;
+		}
+	}
+
+	std::cout << "Hough accumulator created.\n";
+	std::cout << " Accumulator dims: " << numRho << " x " << numTheta << " (rho x theta)\n";
+	std::cout << " rhoMax: " << rhoMax << "\n";
+
 	return accumulator;
 }
 
@@ -80,7 +98,10 @@ std::vector<Line> findLines(
 	oneapi::tbb::concurrent_vector<Line> found;
 
 	// Size of NMS window
-	const int neighborhoodSize = 2;
+	int neighborhoodSize = static_cast<int>(numRho*0.0002);
+	//std::cout << "NSIZE: " << neighborhoodSize << "\n";
+	if (neighborhoodSize < 2) neighborhoodSize = 2;
+
 
 	double thetaStep = PI / numTheta;
 
@@ -114,7 +135,7 @@ std::vector<Line> findLines(
 						int neighborVotes = accumulator[nr][nt].load();
 
 						// If there exists a neighbor with more votes, current cell is not max
-						if (neighborhoodSize > currentVotes) {
+						if (neighborVotes > currentVotes) {
 							isLocalMax = false;
 							break;
 						}
@@ -127,7 +148,7 @@ std::vector<Line> findLines(
 
 					line.theta = t * thetaStep;
 
-					line.rho = (static_cast<double>(r) / numRho) * (2.0 * rhoMax) - rhoMax;
+					line.rho = (static_cast<double>(r) + 0.5) / numRho * (2.0 * rhoMax) - rhoMax;
 
 					line.votes = currentVotes;
 
@@ -136,6 +157,8 @@ std::vector<Line> findLines(
 			}
 		}
 		});
+
+	std::cout << "Found lines (pre filter): " << found.size() << "\n";
 
 	return std::vector<Line>(found.begin(), found.end());
 }
@@ -156,7 +179,7 @@ Image drawLines(const Image& original, const std::vector<Line>& lines) {
 		result.channels = 3;
 	}
 
-	const double L = 1000.0; // line length for drawing (can change)
+	const double L = 100000.0; // line length for drawing (can change)
 
 	for (const Line& line : lines) {
 
@@ -178,7 +201,7 @@ Image drawLines(const Image& original, const std::vector<Line>& lines) {
 		int dy = y2 - y1;
 		int steps = std::max(std::abs(dx), std::abs(dy));
 
-		if (steps == 0); continue;
+		if (steps == 0) continue;
 
 		double xInc = static_cast<double>(dx) / steps;
 		double yInc = static_cast<double>(dy) / steps;
@@ -205,6 +228,8 @@ Image drawLines(const Image& original, const std::vector<Line>& lines) {
 			y += yInc;
 		}
 	}
+
+	std::cout << "Lines drawn: " << lines.size() << "\n";
 
 	return result;
 }
