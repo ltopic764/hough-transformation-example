@@ -6,6 +6,7 @@
 #include <oneapi/tbb/flow_graph.h>
 #include <chrono>
 #include <iostream>
+#include <fstream>
 
 using namespace oneapi::tbb::flow;
 
@@ -96,7 +97,7 @@ void runPipeline(const std::string& inputPath, const std::string& outputPath) {
 
 
 	// Phase 4
-	function_node<DataPtr, continue_msg> phase4(g, 1, [&outputPath](DataPtr data) -> continue_msg {
+	function_node<DataPtr, continue_msg> phase4(g, 1, [&](DataPtr data) -> continue_msg {
 
 		auto start = std::chrono::high_resolution_clock::now();
 
@@ -125,6 +126,25 @@ void runPipeline(const std::string& inputPath, const std::string& outputPath) {
 		std::cout << "Phase 4 (line count/drawing): "
 			<< std::chrono::duration_cast<std::chrono::milliseconds>(end - start).count()
 			<< "ms\n";
+
+		// write to extrenal file
+		std::string reportPath = outputPath.substr(0, outputPath.find_last_of('.')) + "_report.txt";
+		std::ofstream report(reportPath);
+		if (report.is_open()) {
+			report << "Result of Hough's transformation\n";
+			report << "Input image: " << inputPath << "\n";
+			report << "Image dimension: " << data->original.width << "x" << data->original.height << "\n";
+			report << "Number of lines: " << lines.size() << "\n";
+			report << "Max num. of votes in a point: " << data->maxVotes << "\n";
+			report << "\n";
+			report << "Performance" << "\n";
+			// add time difference between sequential and || program
+			report.close();
+			std::cout << "Generated report: " << reportPath << "\n";
+		}
+
+
+
 		return continue_msg();
 		});
 
