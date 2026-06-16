@@ -11,10 +11,10 @@
 // gradient = sqrt(Gx^2 + Gy^2),  if > threshold, then its edge pixel
 Image applySobel(const Image& gray, int threshold, bool parallel) {
 
-	std::cout << "DEBUG: Sobel ulaz - W:" << gray.width << " H:" << gray.height << " Data size:" << gray.data.size() << std::endl;
+	//std::cout << "DEBUG: Sobel ulaz - W:" << gray.width << " H:" << gray.height << " Data size:" << gray.data.size() << std::endl;
 
 	if (gray.data.empty() || gray.width <= 0) {
-		throw std::runtime_error("Sobel dobio praznu sliku!");
+		throw std::runtime_error("Sobel got empty!");
 	}
 
 	// Input image has to be grayscale
@@ -24,7 +24,7 @@ Image applySobel(const Image& gray, int threshold, bool parallel) {
 
 	// OTSU
 	int otsuThreshold = calculateOtsuThreshold(gray, parallel);
-	int finalThreshold = otsuThreshold * 0.9;
+	int finalThreshold = otsuThreshold * 0.85;
 
 	//std::cout << "  Otsu dao prag: " << otsuThreshold << "\n";
 

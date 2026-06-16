@@ -17,7 +17,7 @@ const int NUM_THETA = 180;
 // width of rho bin in px
 const double RHO_BIN_WIDTH = 1.0;
 
-const double HOUGH_THRESHOLD_RATIO = 0.3;
+const double HOUGH_THRESHOLD_RATIO = 0.32;
 
 void runPipeline(const std::string& inputPath, const std::string& outputPath) {
 	graph g;

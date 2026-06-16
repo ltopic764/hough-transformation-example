@@ -105,7 +105,7 @@ std::vector<Line> findLines(
 	oneapi::tbb::concurrent_vector<Line> found;
 
 	// Size of NMS window
-	int neighborhoodSize = static_cast<int>(numRho*0.0002);
+	int neighborhoodSize = static_cast<int>(numRho*0.002);
 	//std::cout << "NSIZE: " << neighborhoodSize << "\n";
 	if (neighborhoodSize < 2) neighborhoodSize = 2;
 
