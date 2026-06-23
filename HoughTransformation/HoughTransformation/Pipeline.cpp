@@ -97,6 +97,9 @@ long long executeBatch(const std::vector<std::pair<std::string, std::string>>& t
 		std::string edgesPath = data->outputPath.substr(0, data->outputPath.find_last_of('.')) + "_edges.png";
 		saveImage(edgesPath, data->edges);
 
+		std::string accPath = data->outputPath.substr(0, data->outputPath.find_last_of('.')) + "_accumulator.png";
+		saveAccumulatorImage(accPath, data->accumulator, NUM_THETA, data->numRho, data->maxVotes);
+
 		return continue_msg();
 		});
 
