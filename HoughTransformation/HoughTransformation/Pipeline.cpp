@@ -1,4 +1,4 @@
-#include "pipeline.h"
+﻿#include "pipeline.h"
 #include "image.h"
 #include "edge_detection.h"
 #include "hough.h"
@@ -19,7 +19,30 @@ const double RHO_BIN_WIDTH = 1.0;
 
 const double HOUGH_THRESHOLD_RATIO = 0.32;
 
-void runPipeline(const std::vector<std::pair<std::string, std::string>>& imagePaths) {
+void runPipeline(const std::vector<std::pair<std::string, std::string>>& tasks) {
+	std::cout << "--- STARTING SEQUENTIAL BATCH ---\n";
+	long long tSeq = executeBatch(tasks, false);
+	std::cout << "Sequential batch took: " << tSeq << " ms\n\n";
+
+	std::cout << "--- STARTING PARALLEL BATCH ---\n";
+	long long tPar = executeBatch(tasks, true);
+	std::cout << "Parallel batch took: " << tPar << " ms\n\n";
+
+	double speedup = static_cast<double>(tSeq) / tPar;
+
+	// Generating a summary
+	std::ofstream report("batch_report.txt");
+	report << "HOUGH TRANSFORMATION BATCH REPORT\n";
+	report << "Number of images: " << tasks.size() << "\n\n";
+	report << "Total Sequential Time: " << tSeq << " ms\n";
+	report << "Total Parallel Time:   " << tPar << " ms\n";
+	report << "Total Speedup:         " << speedup << "x\n";
+	report.close();
+
+	std::cout << "Report generated: batch_report.txt\n";
+}
+
+long long executeBatch(const std::vector<std::pair<std::string, std::string>>& tasks, bool parallelMode) {
 	graph g;
 
 	// Shared state between phases
@@ -41,93 +64,38 @@ void runPipeline(const std::vector<std::pair<std::string, std::string>>& imagePa
 	using DataPtr = std::shared_ptr<PipelineData>;
 
 
-	// Phase 1
-	// Load + grayscale
-	function_node<DataPtr, DataPtr> phase1(g, unlimited, [](DataPtr data) -> DataPtr {
-		
-		auto start = std::chrono::high_resolution_clock::now();
-		
+	// PHASE 1
+	function_node<DataPtr, DataPtr> phase1(g, unlimited, [parallelMode](DataPtr data) -> DataPtr {
 		data->original = loadImage(data->inputPath);
-		data->gray = toGrayscale(data->original, data->isParallel);
-
-		auto end = std::chrono::high_resolution_clock::now();
-		std::cout << "Phase 1 (grayscale): "
-			<< std::chrono::duration_cast<std::chrono::milliseconds>(end - start).count()
-			<< "ms\n";
-		return data;
-	});
-
-	// Phase 2
-	// Sobel edges detection
-	function_node<DataPtr, DataPtr> phase2(g, unlimited, [](DataPtr data) -> DataPtr {
-		
-		auto start = std::chrono::high_resolution_clock::now();
-
-		data->edges = applySobel(data->gray, SOBEL_THRESHOLD, data->isParallel);
-		
-		auto end = std::chrono::high_resolution_clock::now();
-		std::cout << "Phase 2 (edges): "
-			<< std::chrono::duration_cast<std::chrono::milliseconds>(end - start).count()
-			<< "ms\n";
-		return data;
-	});
-
-	// Phase 3
-	// Hough accumulator
-	function_node<DataPtr, DataPtr> phase3(g, unlimited, [](DataPtr data) -> DataPtr {
-		
-		auto start = std::chrono::high_resolution_clock::now();
-
-		// image diagonal
-		double diag = std::sqrt(
-			static_cast<double>(data->edges.width) * data->edges.width +
-			static_cast<double>(data->edges.height) * data->edges.height
-		);
-
-		int numRho = static_cast<int>((2.0 * diag) / RHO_BIN_WIDTH);
-
-		data->numRho = numRho;
-
-		data->accumulator = buildAccumulator(data->edges, NUM_THETA, numRho, data->rhoMax, data->maxVotes, data->isParallel);
-
-		auto end = std::chrono::high_resolution_clock::now();
-		std::cout << "Phase 3 (accumulator): "
-			<< std::chrono::duration_cast<std::chrono::milliseconds>(end - start).count()
-			<< "ms\n";
+		data->gray = toGrayscale(data->original, parallelMode);
 		return data;
 		});
 
+	// PHASE 2
+	function_node<DataPtr, DataPtr> phase2(g, unlimited, [parallelMode](DataPtr data) -> DataPtr {
+		data->edges = applySobel(data->gray, SOBEL_THRESHOLD, parallelMode);
+		return data;
+		});
 
-	// Phase 4
-	function_node<DataPtr, continue_msg> phase4(g, unlimited, [](DataPtr data) -> continue_msg {
+	// PHASE 3
+	function_node<DataPtr, DataPtr> phase3(g, unlimited, [parallelMode](DataPtr data) -> DataPtr {
+		double diag = std::sqrt(static_cast<double>(data->edges.width) * data->edges.width +
+			static_cast<double>(data->edges.height) * data->edges.height);
+		data->numRho = static_cast<int>((2.0 * diag) / RHO_BIN_WIDTH);
+		data->accumulator = buildAccumulator(data->edges, NUM_THETA, data->numRho, data->rhoMax, data->maxVotes, parallelMode);
+		return data;
+		});
 
-		auto start = std::chrono::high_resolution_clock::now();
-
+	// PHASE 4
+	function_node<DataPtr, continue_msg> phase4(g, unlimited, [parallelMode](DataPtr data) -> continue_msg {
 		int houghThreshold = static_cast<int>(data->maxVotes * HOUGH_THRESHOLD_RATIO);
+		std::vector<Line> lines = findLines(data->accumulator, NUM_THETA, data->numRho, data->rhoMax, houghThreshold, parallelMode);
 
-		/*std::cout << "  houghThreshold racunat dinamicki: " << houghThreshold
-			<< " (= " << (HOUGH_THRESHOLD_RATIO * 100) << "% od maxVotes="
-			<< data->maxVotes << ")\n";*/
-
-		std::vector<Line> lines = findLines(data->accumulator, NUM_THETA, data->numRho, data->rhoMax, houghThreshold, data->isParallel);
-
-		// original image with red lines
 		Image result = drawLines(data->original, lines);
 		saveImage(data->outputPath, result);
 
-		// edge image
 		std::string edgesPath = data->outputPath.substr(0, data->outputPath.find_last_of('.')) + "_edges.png";
 		saveImage(edgesPath, data->edges);
-
-		// accumulator image
-		std::string accPath = data->outputPath.substr(0, data->outputPath.find_last_of('.')) + "_accumulator.png";
-		saveAccumulatorImage(accPath, data->accumulator, NUM_THETA, data->numRho, data->maxVotes);
-
-
-		auto end = std::chrono::high_resolution_clock::now();
-		std::cout << "Phase 4 (line count/drawing): "
-			<< std::chrono::duration_cast<std::chrono::milliseconds>(end - start).count()
-			<< "ms\n";
 
 		return continue_msg();
 		});
@@ -136,24 +104,24 @@ void runPipeline(const std::vector<std::pair<std::string, std::string>>& imagePa
 	make_edge(phase2, phase3);
 	make_edge(phase3, phase4);
 
-	auto startTimeBatch = std::chrono::high_resolution_clock::now();
+	auto start = std::chrono::high_resolution_clock::now();
 
-	for (const auto& pair : imagePaths) {
+	for (const auto& task : tasks) {
 		auto data = std::make_shared<PipelineData>();
-		data->inputPath = pair.first;
-		data->outputPath = pair.second;
-
+		data->inputPath = task.first;
+		data->outputPath = task.second;
+		data->isParallel = parallelMode;
 		phase1.try_put(data);
+
+		if (!parallelMode) {
+			g.wait_for_all();
+		}
 	}
 
-	// wait for graph to finish all images
-	g.wait_for_all();
+	if (parallelMode) {
+		g.wait_for_all();
+	}
 
-	auto endTimeBatch = std::chrono::high_resolution_clock::now();
-	auto totalTime = std::chrono::duration_cast<std::chrono::milliseconds>(endTimeBatch - startTimeBatch).count();
-
-	std::cout << "BATCH PROCESSING FINISHED\n";
-	std::cout << "Processed " << imagePaths.size() << " images.\n";
-	std::cout << "Total execution time: " << totalTime << " ms\n";
-
+	auto end = std::chrono::high_resolution_clock::now();
+	return std::chrono::duration_cast<std::chrono::milliseconds>(end - start).count();
 }

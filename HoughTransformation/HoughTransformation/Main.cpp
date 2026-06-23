@@ -1,7 +1,7 @@
 #include "pipeline.h"
 #include <iostream>
 #include <vector>
-
+#include <string>
 
 int main() {
     std::vector<std::pair<std::string, std::string>> tasks = {
@@ -13,8 +13,17 @@ int main() {
 
     std::cout << "Began Hough transformation...\n";
 
-    runPipeline(tasks);
+    try {
+        runPipeline(tasks);
+    }
+    catch (const std::exception& e) {
+        std::cerr << "Error: " << e.what() << std::endl;
+        return 1;
+    }
 
-    std::cout << "Finished.\n";
+    std::cout << "\nDone. Press Enter to exit.";
+    std::cin.get();
+    return 0;
+
     return 0;
 }

@@ -1,0 +1,6 @@
+HOUGH TRANSFORMATION BATCH REPORT
+Number of images: 4
+
+Total Sequential Time: 16348 ms
+Total Parallel Time:   5828 ms
+Total Speedup:         2.80508x
