@@ -1,19 +1,20 @@
 #include "pipeline.h"
 #include <iostream>
+#include <vector>
 
-int main(int argc, char* argv[]) {
-	if (argc < 3) {
-		std::cout << "Usage: hough_tbb <input_image> <output_image>\n";
-		std::cout << "Example: hough_tbb images/test1.bmp output/result.bmp\n";
-		return 1;
-	}
 
-	std::string inputPath = argv[1];
-	std::string outputPath = argv[2];
+int main() {
+    std::vector<std::pair<std::string, std::string>> tasks = {
+        {"input/test.png", "output/res.png"},
+        {"input/test1.png", "output/res1.png"},
+        {"input/test3.png", "output/res3.png"},
+        {"input/test4.png", "output/res4.png"}
+    };
 
-	std::cout << "Running Hough transformation on: " << inputPath << "\n";
-	runPipeline(inputPath, outputPath);
-	std::cout << "Done" << "\n";
+    std::cout << "Began Hough transformation...\n";
 
-	return 0;
+    runPipeline(tasks);
+
+    std::cout << "Finished.\n";
+    return 0;
 }
